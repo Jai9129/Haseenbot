@@ -6,6 +6,8 @@ from threading import Thread
 from datetime import datetime
 import random
 import time
+import signal
+import sys
 
 import aiohttp
 import discord
@@ -31,11 +33,9 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 
 # --- Configuration ---
-# IMPORTANT: Replace these with your actual channel IDs.
-SERVER_COUNT_CHANNEL_ID = 1419729255977189467  # Replace with your server count channel ID
-USER_COUNT_CHANNEL_ID = 1419729283861184632    # Replace with your user count channel ID
-LOG_CHANNEL_ID = 1396794297386532978 # Replace with the channel ID for join/leave logs
-
+SERVER_COUNT_CHANNEL_ID = int(os.getenv("SERVER_COUNT_CHANNEL_ID", "1419729255977189467"))
+USER_COUNT_CHANNEL_ID = int(os.getenv("USER_COUNT_CHANNEL_ID", "1419729283861184632"))
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "1396794297386532978"))
 
 client = zyrox()
 tree = client.tree
@@ -48,26 +48,27 @@ async def update_stats():
         try:
             servers = len(client.guilds)
             users = sum(guild.member_count for guild in client.guilds if guild.member_count is not None)
-            
+
             server_channel = client.get_channel(SERVER_COUNT_CHANNEL_ID)
             user_channel = client.get_channel(USER_COUNT_CHANNEL_ID)
-            
+
             if server_channel:
                 await server_channel.edit(name=f"Servers: {servers}")
-            
+
             if user_channel:
                 await user_channel.edit(name=f"Users: {users}")
-                
+
         except Exception as e:
-            print(f"Error updating stats: {e}")
-        
-        await asyncio.sleep(600) # Update every 10 minutes
+            print(f"[Stats] Error updating stats: {e}")
+
+        await asyncio.sleep(600)  # Update every 10 minutes
+
 
 # --- Event Handlers ---
 @client.event
 async def on_ready():
     await client.wait_until_ready()
-    
+
     print("""
         \033[1;31m
  ██████╗ ██████╗ ██████╗ ███████╗██╗  ██╗
@@ -88,16 +89,16 @@ async def on_ready():
         print(f"Synced Total {len(all_commands)} Client Commands and {len(synced)} Slash Commands")
     except Exception as e:
         print(e)
-        
+
     client.loop.create_task(update_stats())
 
 
 @client.event
 async def on_guild_join(guild: discord.Guild):
-    # Log when the bot joins a server
     log_channel = client.get_channel(LOG_CHANNEL_ID)
     if log_channel:
         await log_channel.send(f"Zyrox X has been added to the server: **{guild.name}** (ID: `{guild.id}`)")
+
 
 @client.event
 async def on_command_completion(context: commands.Context) -> None:
@@ -107,12 +108,16 @@ async def on_command_completion(context: commands.Context) -> None:
     full_command_name = context.command.qualified_name
     split = full_command_name.split("\n")
     executed_command = str(split[0])
-    webhook_url = "https://discord.com/api/webhooks/1393938120575029278/DZfp7Irx4oQprKZ1LjouSCZGKawEesXo4YMuIj7x5XspS24WTamTzKG4TqQan125_Qfw"
+
+    webhook_url = os.getenv(
+        "CMD_LOG_WEBHOOK",
+        "https://discord.com/api/webhooks/1393938120575029278/DZfp7Irx4oQprKZ1LjouSCZGKawEesXo4YMuIj7x5XspS24WTamTzKG4TqQan125_Qfw"
+    )
+
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(webhook_url, session=session)
 
-        embed_color = 0xFF0000
-        embed = discord.Embed(color=embed_color)
+        embed = discord.Embed(color=0xFF0000)
         avatar_url = context.author.display_avatar.url
 
         embed.set_author(name=f"Cmd Executed: {executed_command}", icon_url=avatar_url)
@@ -124,14 +129,14 @@ async def on_command_completion(context: commands.Context) -> None:
             embed.add_field(name="Channel", value=f"{context.channel.mention} (`{context.channel.id}`)", inline=False)
         else:
             embed.add_field(name="User (DM)", value=f"{context.author.mention} (`{context.author.id}`)", inline=False)
-        
+
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="Zyrox X Development™ ❤️", icon_url=client.user.display_avatar.url)
-        
+
         try:
             await webhook.send(embed=embed)
         except Exception as e:
-            print(f'Command log webhook failed: {e}')
+            print(f'[Webhook] Command log failed: {e}')
 
 
 # --- Utility Commands ---
@@ -143,11 +148,11 @@ async def spotify(ctx: Context, user: discord.Member = None):
 
     if not spotify_activity:
         return await ctx.send(f"{user.name} is not listening to Spotify.")
-    
+
     embed = discord.Embed(
         title=f"{user.name}'s Spotify",
         description=f"**Listening to:** {spotify_activity.title}",
-        color=0x1DB954 # Spotify Green
+        color=0x1DB954
     )
     embed.set_thumbnail(url=spotify_activity.album_cover_url)
     embed.add_field(name="Artist", value=spotify_activity.artist)
@@ -162,7 +167,7 @@ async def make_invite(ctx: Context, guild_id: int = None):
     """Creates an invite for a specified server (owner only)."""
     if guild_id is None:
         return await ctx.send("Please provide a Guild ID.")
-        
+
     guild = client.get_guild(guild_id)
     if not guild:
         return await ctx.send("Invalid Guild ID. I am not in that server.")
@@ -181,7 +186,7 @@ async def make_invite(ctx: Context, guild_id: int = None):
                 return await ctx.send(f"Invite for **{guild.name}** (from #{channel.name}):\n{invite.url}")
             except Exception:
                 continue
-                
+
     await ctx.send(f"I don't have 'Create Instant Invite' permission in any channel in **{guild.name}**.")
 
 
@@ -192,7 +197,7 @@ async def create_hook(ctx: Context, *, name: str = None):
     """Creates a webhook in the current channel."""
     if name is None:
         return await ctx.send("Please provide a name for the webhook.")
-    
+
     try:
         webhook = await ctx.channel.create_webhook(name=name, reason=f"Created by {ctx.author}")
         embed = discord.Embed(
@@ -248,19 +253,19 @@ async def reaction(ctx: Context):
     emojis = ["🍪", "🎉", "🧋", "🍒", "🍑", "💸", "🌙", "💕"]
     correct_emoji = random.choice(emojis)
     random.shuffle(emojis)
-    
+
     embed = discord.Embed(
         title="Reaction Test",
         description="I will show an emoji in a few seconds. Get ready to click it!",
         color=0xFF0000
     )
     message = await ctx.send(embed=embed)
-    
+
     for emoji in emojis:
         await message.add_reaction(emoji)
-        
+
     await asyncio.sleep(random.uniform(2.0, 7.0))
-    
+
     embed.description = f"**GET THE {correct_emoji} EMOJI!**"
     await message.edit(embed=embed)
     start_time = time.time()
@@ -276,7 +281,7 @@ async def reaction(ctx: Context):
         reaction, user = await client.wait_for("reaction_add", timeout=15.0, check=check)
         end_time = time.time()
         reaction_time = end_time - start_time
-        
+
         embed.description = f"{user.mention} got the {correct_emoji} in **{reaction_time:.2f} seconds**!"
         await message.edit(embed=embed)
     except asyncio.TimeoutError:
@@ -284,45 +289,55 @@ async def reaction(ctx: Context):
         await message.edit(embed=embed)
 
 
-# --- Keep Alive Server ---
-from flask import Flask
-from threading import Thread
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return f"Zyrox Development™ 2025"
-
-def run():
-    app.run(host='0.0.0.0', port=19346)
-
-def keep_alive():
-    server = Thread(target=run)
-    server.start()
-
+# --- Keep Alive (Railway.app compatible) ---
+from keep_alive import keep_alive
 keep_alive()
+
+
+# --- Graceful Shutdown Handler ---
+def handle_exit(sig, frame):
+    print("\n[Shutdown] Signal received, shutting down gracefully...")
+    asyncio.get_event_loop().stop()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_exit)
+signal.signal(signal.SIGINT, handle_exit)
+
 
 # --- Main Bot Execution ---
 async def main():
+    if not TOKEN:
+        print("[ERROR] TOKEN environment variable is not set! Please add it to Railway variables.")
+        sys.exit(1)
+
     async with client:
         os.system("clear")
         await client.load_extension("jishaku")
-        
-        max_retries = 5
+
+        max_retries = 10
         for attempt in range(max_retries):
             try:
+                print(f"[Bot] Connecting... (Attempt {attempt + 1}/{max_retries})")
                 await client.start(TOKEN)
                 break
             except discord.HTTPException as e:
-                if e.status == 429: # Rate limited
+                if e.status == 429:  # Rate limited
                     wait_time = min((2 ** attempt) + random.random(), 60)
-                    print(f"Rate limited. Retrying in {wait_time:.2f} seconds...")
+                    print(f"[Bot] Rate limited. Retrying in {wait_time:.2f} seconds...")
                     await asyncio.sleep(wait_time)
                 else:
+                    print(f"[Bot] HTTPException: {e}")
                     raise
+            except discord.LoginFailure:
+                print("[Bot] Invalid TOKEN. Please check your Railway environment variables.")
+                sys.exit(1)
+            except Exception as e:
+                wait_time = min((2 ** attempt) + random.random(), 60)
+                print(f"[Bot] Unexpected error: {e}. Retrying in {wait_time:.2f}s...")
+                await asyncio.sleep(wait_time)
         else:
-            raise Exception("Bot failed to start after multiple retries due to rate limiting.")
+            print("[Bot] Failed to start after maximum retries.")
+            sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
